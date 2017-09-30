@@ -53,6 +53,104 @@ YandexDisk.prototype = {
         });
     },
 
+    uploadSplitFile: function(srcFile, targetPath, chunkSize,  callback) {
+	var that = this;
+	fs.stat(srcFile, function(err, stats) {
+	    if (err) {
+		return callback(err);
+	    }
+	    if (!stats.isFile()) {
+		return callback(new Error('Not found.'));
+	    }
+
+	    var totalSize = stats.size;
+
+	    // Number of parts (exclusive last part!)
+	    var parts = Math.ceil(totalSize / chunkSize);
+	    var splitSize = chunkSize;
+
+	    console.log( "Parts: " + parts);
+	    console.log( "Size: " + totalSize);
+	    
+	    // If size of the parts is 0 then you have more parts than bytes.
+	    //if(splitSize < 1) {
+	    //		return Promise.reject(new Error("Too many parts, or file too small!"));
+	    //}
+
+	    // Get last split size, this is different from the others because it uses scrap value.
+	    var lastSplitSize = totalSize - (splitSize * (parts-1));
+
+	    // Capture the partinfo in here:
+	    var partInfo = [];
+
+	    // Iterate the parts
+	    for (var i = 0; i < parts; i ++) {
+		partInfo[i] = {
+		    number: i + 1,
+
+		    // Set buffer read start position
+		    start: i * splitSize,
+
+		    // Set total ending position
+		    end: (i * splitSize) + splitSize
+		};
+
+		if (i === parts-1) {
+		    partInfo[i].end = (i * splitSize) + lastSplitSize;
+		}
+	    }
+
+	    console.log(partInfo);
+
+	    (function next(i) {
+		if (i < parts) {
+		    var targetFullName = targetPath + partInfo[i].number;
+
+                    that.exists( targetFullName, function(err, file_exists) {
+                        if ( err ) {
+                            return callback(err);
+                        };
+                        if ( file_exists ) {
+                            console.log("Skip " + targetFullName);
+                            next(i + 1);
+                        }
+                        else {
+		            var headers = {
+		                'Expect': '100-continue',
+			        'Content-Type': 'application/binary',
+			        'Content-Length': partInfo[i].end - partInfo[i].start
+		            };
+		            var read = fs.createReadStream(srcFile,{
+		                encoding: null,
+		                start: partInfo[i].start,
+		                end: partInfo[i].end - 1
+		            });
+
+		            console.log("Upload chunk " + targetFullName);
+		            console.log({
+			        encoding: null,
+			        start: partInfo[i].start,
+			        end: partInfo[i].end - 1
+		            });
+		            that._request('PUT', targetFullName, headers, read, null, function(err) {
+			        console.log("Done");
+			        if (err) {
+			            return callback(err);
+			        }
+		                next(i + 1);
+		            });
+                        }
+		    });
+		} else {
+		    console.log("All done");
+		    callback(null);
+		}
+	    })(0);
+
+	    
+	});
+    },
+    
     uploadDir: function(srcDir, targetDir, callback) {
         var that = this;
         this.mkdir(targetDir, function(err) {
